@@ -31,12 +31,12 @@ function handleRequest(ws: WebSocket, request: Request) {
     } else {
       handleRegistration(ws, request);
     }
+    break;
   }
 }
 
 function handleRegistration(ws: WebSocket, request: Request) {
   const { name, password } = request.data;
-  console.log(request.data);
 
   const { index, error, errorText } = db.registerPlayer(name, password);
 
