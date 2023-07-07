@@ -1,5 +1,5 @@
 import WebSocket from 'ws';
-import { Request } from '../model/types/index';
+import { Player, Request } from '../model/types/index';
 import * as db from '../db/db.ts';
 import { WebSocketServer } from 'ws';
 // import { v4 as uuidv4 } from 'uuid';
@@ -24,9 +24,13 @@ wss.on('connection', (ws: WebSocket) => {
 });
 
 function handleRequest(ws: WebSocket, request: Request) {
+  console.log(request);
+
+  const requestData = JSON.parse(request.data); 
+
   switch (request.type) {
   case 'reg':
-    if (db.playerExists(request.data.name)) {
+    if (db.playerExists(requestData.name)) {
       handleLogin(ws, request);
     } else {
       handleRegistration(ws, request);
@@ -36,7 +40,7 @@ function handleRequest(ws: WebSocket, request: Request) {
 }
 
 function handleRegistration(ws: WebSocket, request: Request) {
-  const { name, password } = request.data;
+  const { name, password }: Player = JSON.parse(request.data);
 
   const { index, error, errorText } = db.registerPlayer(name, password);
 
@@ -55,7 +59,7 @@ function handleRegistration(ws: WebSocket, request: Request) {
 }
 
 function handleLogin(ws: WebSocket, request: Request) {
-  const { name, password } = request.data;
+  const { name, password } = JSON.parse(request.data);
 
   db.loginPlayer(name, password);
 

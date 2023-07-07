@@ -1,11 +1,12 @@
 export interface Player {
   name: string;
-  password?: string;
+  password: string;
   wins: number;
 }
 
 export interface Request {
   type: string;
-  data: Player;
+  data: string;
+  id: number;
 }
 
