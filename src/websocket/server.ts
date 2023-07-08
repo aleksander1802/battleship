@@ -5,12 +5,19 @@ import {
   RoomUsers,
 } from '../model/types/index';
 import * as db from '../db/db.ts';
+import { players } from '../db/db.ts';
 import { WebSocketServer } from 'ws';
 import { v4 as uuidv4 } from 'uuid';
+import { AddShipsData, AddShipsRequest } from '../../src/model/types/ships.ts';
+import { handleLogin } from './handleLogin.ts';
+import { handleRegistration } from './handleRegistration.ts';
+import { handleRoomCreation } from './handleRoomCreation.ts';
 
 const webSocketPort = 3000;
 
-let connections: CustomWebSocket[] = [];
+export let connections: CustomWebSocket[] = [];
+export let roomUsers: RoomUsers[] = [];
+const playersInGame: AddShipsData[] = [];
 
 export const wss = new WebSocketServer({
   port: webSocketPort,
@@ -18,8 +25,9 @@ export const wss = new WebSocketServer({
 
 wss.on('connection', (ws: CustomWebSocket) => {
   console.log('A client connected');
-  const uniqueIndex: string = uuidv4();
-  ws.index = uniqueIndex;
+
+  const userId = uuidv4();
+  ws.index = userId;
 
   connections.push(ws);
 
@@ -53,103 +61,23 @@ function handleRequest(ws: CustomWebSocket, request: Request) {
       break;
     case 'add_user_to_room':
       addUserToRoomAndStartTheGame(ws);
+
+      break;
+    case 'add_ships':
+      addShips(ws, request);
       break;
   }
 }
 
-function handleRegistration(ws: CustomWebSocket, request: Request) {
-  const { name, password }: Player = JSON.parse(request.data);
-
-  const { error, errorText } = db.registerPlayer(name, password, ws.index);
-
-  const response = {
-    type: 'reg',
-    data: JSON.stringify({
-      name,
-      index: ws.index,
-      error,
-      errorText,
-    }),
-    id: 0,
-  };
-
-  ws.send(JSON.stringify(response));
-}
-
-function handleLogin(ws: CustomWebSocket, request: Request) {
-  const { name, password } = JSON.parse(request.data);
-
-  db.loginPlayer(name, password);
-
-  const response = {
-    type: 'reg',
-    data: JSON.stringify({
-      name,
-      password,
-    }),
-    id: 0,
-  };
-
-  ws.send(JSON.stringify(response));
-}
-
-let roomUsers: RoomUsers[] = [];
-
-function handleRoomCreation(ws: CustomWebSocket) {
-  if (roomUsers.length > 0) return;
-
-  if (roomUsers.length === 0) {
-    const creator = db.players.find(
-      (player) => player.index === ws.index,
-    ) as Player;
-
-    roomUsers.push(creator);
-
-    const response = {
-      type: 'create_room',
-      data: '',
-    };
-
-    ws.send(JSON.stringify(response));
-  }
-
-  if (roomUsers.length === 1) {
-    updateRoom(ws);
-  }
-}
-
-const updateRoom = (ws: CustomWebSocket) => {
-  const update = JSON.stringify([
-    {
-      roomId: ws.index,
-      roomUsers: roomUsers,
-    },
-  ]);
-
-  const response = {
-    type: 'update_room',
-    data: update,
-    id: 0,
-  };
-
-  connections.forEach((ws) => {
-    ws.send(JSON.stringify(response));
-  });
-};
-
-export function roomUserExists(name: string) {
-  return roomUsers.some((player) => player.name === name);
-}
-
 const addUserToRoomAndStartTheGame = (ws: CustomWebSocket) => {
   addUserToExistRoom(ws);
-  startTheGame(ws);
+  placementOfShipsForTheGame(ws);
 };
 
 const addUserToExistRoom = (ws: CustomWebSocket) => {
   if (roomUsers.length === 2) return;
 
-  const creator = db.players.find(
+  const creator = players.find(
     (player) => player.index === roomUsers[0].index,
   ) as Player;
 
@@ -161,7 +89,7 @@ const addUserToExistRoom = (ws: CustomWebSocket) => {
     id: 0,
   };
 
-  const addUserToRoom = [...db.players].filter(
+  const addUserToRoom = [...players].filter(
     (player) => player.index !== creator.index,
   )[0];
 
@@ -170,22 +98,103 @@ const addUserToExistRoom = (ws: CustomWebSocket) => {
   ws.send(JSON.stringify(response));
 };
 
-const startTheGame = (ws: CustomWebSocket) => {
-  const creator = db.players.find(
-    (player) => player.index === roomUsers[0].index,
+const placementOfShipsForTheGame = (ws: CustomWebSocket) => {
+  const creator = roomUsers.find(
+    (player) => player.index === ws.index,
   ) as Player;
 
-  const response = {
+  const dataID1 = roomUsers.filter(
+    (player) => player.index === creator.index,
+  )[0];
+  const dataID2 = roomUsers.filter(
+    (player) => player.index !== creator.index,
+  )[0];
+
+  const data1 = JSON.stringify({
+    idGame: creator.index,
+    idPlayer: dataID1.index,
+  });
+
+  const data2 = JSON.stringify({
+    idGame: creator.index,
+    idPlayer: dataID2.index,
+  });
+
+  const response1 = {
     type: 'create_game',
-    data: JSON.stringify({
-      idGame: creator.index,
-      idPlayer: ws.index,
-    }),
+    data: data1,
     id: 0,
   };
 
-  connections.forEach((ws) => {
-    ws.send(JSON.stringify(response));
-  });
+  const response2 = {
+    type: 'create_game',
+    data: data2,
+    id: 0,
+  };
+
+  const connection1 = connections.filter(
+    (item) => item.index === creator.index,
+  )[0];
+
+  const connection2 = connections.filter(
+    (item) => item.index !== creator.index,
+  )[0];
+  connection1.send(JSON.stringify(response1));
+  connection2.send(JSON.stringify(response2));
+
   roomUsers.length = 0;
+};
+
+const addShips = (ws: CustomWebSocket, request: AddShipsRequest) => {
+  const addShipsData = JSON.parse(request.data) as AddShipsData;
+
+  playersInGame.push(addShipsData);
+
+  if (playersInGame.length === 2) {
+    startTheGame(ws, playersInGame);
+  }
+};
+
+const startTheGame = (ws: CustomWebSocket, playersInGame: AddShipsData[]) => {
+  const currentClient = playersInGame.find(
+    (client) => client.indexPlayer === ws.index,
+  ) as AddShipsData;
+
+  const secondPlayer = playersInGame.filter(
+    (client) => client.indexPlayer !== currentClient.indexPlayer,
+  )[0] as AddShipsData;
+
+  const currentClientData = JSON.stringify({
+    ships: currentClient.ships,
+    currentPlayerIndex: currentClient.indexPlayer,
+  });
+  const secondPlayerData = JSON.stringify({
+    ships: secondPlayer.ships,
+    currentPlayerIndex: secondPlayer.indexPlayer,
+  }); 
+
+  console.log(currentClientData);
+
+  const response1 = {
+    type: 'start_game',
+    data: currentClientData,
+    id: 0,
+  };
+
+  const response2 = {
+    type: 'start_game',
+    data: secondPlayerData,
+    id: 0,
+  };
+
+  const connection1 = connections.filter(
+    (item) => item.index === currentClient.indexPlayer,
+  )[0];
+
+  const connection2 = connections.filter(
+    (item) => item.index !== connection1.index,
+  )[0];
+
+  connection1.send(JSON.stringify(response1));
+  connection2.send(JSON.stringify(response2));
 };

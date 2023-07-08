@@ -17,4 +17,9 @@ httpServer.listen(HTTP_PORT, () => {
       console.error(`Failed to open browser: ${error}`);
     }
   });
+  exec(`${openCommand} http://localhost:${HTTP_PORT}`, (error) => {
+    if (error) {
+      console.error(`Failed to open browser: ${error}`);
+    }
+  });
 });
