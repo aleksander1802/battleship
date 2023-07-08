@@ -6,24 +6,22 @@ export function playerExists(name: string) {
   return players.some((player) => player.name === name);
 }
 
-export function registerPlayer(name: string, password: string) {
+export function registerPlayer(name: string, password: string, index: string) {
   if (playerExists(name)) {
     return { index: -1, error: true, errorText: 'Player already exists' };
   }
 
-  console.log(name, password);
-
   const newPlayer = {
     name,
     password,
+    index,
     wins: 0,
   };
 
   players.push(newPlayer);
-  console.log(players);
 
   return {
-    index: players.length,
+    index,
     error: false,
     errorText: '',
   };
