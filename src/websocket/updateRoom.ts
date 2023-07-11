@@ -1,10 +1,10 @@
 import { connections, roomUsers } from './server.ts';
 
-export const updateRoom = () => {
+export const updateRoom = (roomId: string) => {
   const update = JSON.stringify([
     {
-      roomId: roomUsers[0].index,
-      roomUsers: roomUsers,
+      roomId,
+      roomUsers,
     },
   ]);
 
