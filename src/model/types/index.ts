@@ -21,3 +21,9 @@ export interface RoomUsers {
 export interface CustomWebSocket extends WebSocket {
   index: string;
 }
+
+export type FinishMessage = {
+  type: 'finish';
+  data: string;
+  id: number;
+};

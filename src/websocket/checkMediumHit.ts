@@ -9,7 +9,7 @@ export function checkMediumHit(
   const numRows = matrix.length;
   const numCols = matrix[0].length;
 
-  const updatedMatrix: GameMatrix = [...matrix];
+  const updatedMatrix: GameMatrix = matrix.map((rows) => [...rows]);
 
   if (x > 0 && matrix[y][x - 1] === 'shot') {
     if (matrix[y][x] === 'medium') {

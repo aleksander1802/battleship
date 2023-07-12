@@ -1,5 +1,6 @@
 import {
   CustomWebSocket,
+  FinishMessage,
   Player,
   Request,
   RoomUsers,
@@ -14,11 +15,13 @@ import {
   PlayerCoordinates,
   Ship,
   Status,
+  UpdatedCoordinates,
 } from '../../src/model/types/ships.ts';
 
 import { handleRegistration } from './handleRegistration.ts';
 import { handleRoomCreation } from './handleRoomCreation.ts';
 import {
+  GameMatrix,
   MatrixCells,
   PlayerMatrixForTheGame,
 } from '../../src/model/types/matrix.ts';
@@ -164,8 +167,6 @@ const addShips = (ws: CustomWebSocket, request: AddShipsRequest) => {
 
   const matrix = createMatrix(ships);
 
-  console.table(matrix);
-
   const player: PlayerMatrixForTheGame = {
     currentGameId: ShipsData.gameId,
     ships: matrix,
@@ -262,6 +263,8 @@ const handleAttack = (request: Request) => {
     (enemy) => enemy.indexPlayer !== currentPlayer.indexPlayer,
   )[0];
 
+  const enemyShips = enemy.ships.map((rows) => [...rows]);
+
   if (enemy.turn) return;
 
   type AttackFeedback = {
@@ -270,7 +273,7 @@ const handleAttack = (request: Request) => {
   };
 
   const { status, updatedMatrix } = checkAttack(
-    enemy.ships,
+    enemyShips,
     coordinates,
   ) as AttackFeedback;
 
@@ -296,27 +299,82 @@ const handleAttack = (request: Request) => {
     id: number;
   };
 
-  const response: Response = {
-    type: 'attack',
-    data: JSON.stringify({
-      position: {
-        x: currentPlayer.x,
-        y: currentPlayer.y,
-      },
-      currentPlayer: currentPlayer.indexPlayer,
-      status: status,
-    }),
-    id: 0,
-  };
+  if (status === 'retry') {
+    const cell = updatedMatrix[currentPlayer.y][currentPlayer.x];
 
-  connection1.send(JSON.stringify(response));
-  connection2.send(JSON.stringify(response));
+    const response: Response = {
+      type: 'attack',
+      data: JSON.stringify({
+        position: {
+          x: currentPlayer.x,
+          y: currentPlayer.y,
+        },
+        currentPlayer: currentPlayer.indexPlayer,
+        status: cell,
+      }),
+      id: 0,
+    };
 
-  if (status === 'killed' || status === 'shot' || status === 'retry') {
+    connection1.send(JSON.stringify(response));
+    connection2.send(JSON.stringify(response));
+    playerTurn(connection1, connection2, currentPlayer.indexPlayer);
+  } else if (status === 'shot') {
+    const response: Response = {
+      type: 'attack',
+      data: JSON.stringify({
+        position: {
+          x: currentPlayer.x,
+          y: currentPlayer.y,
+        },
+        currentPlayer: currentPlayer.indexPlayer,
+        status: status,
+      }),
+      id: 0,
+    };
+
+    connection1.send(JSON.stringify(response));
+    connection2.send(JSON.stringify(response));
+    playerTurn(connection1, connection2, currentPlayer.indexPlayer);
+  } else if (status === 'killed') {
+    const destroyed = isAllShipsDestroyed(updatedMatrix);
+    if (destroyed) {
+      const data = JSON.stringify({
+        winPlayer: currentPlayer.indexPlayer,
+      });
+
+      const response: FinishMessage = {
+        type: 'finish',
+        data,
+        id: 0,
+      };
+
+      connection1.send(JSON.stringify(response));
+      connection2.send(JSON.stringify(response));
+      return;
+    }
+
+    const updatedCoordinates = getUpdatedCoordinates(enemyShips, updatedMatrix);
+
+    for (let i = 0; i < updatedCoordinates.length; i++) {
+      const coord = updatedCoordinates[i];
+      const response: Response = {
+        type: 'attack',
+        data: JSON.stringify({
+          position: {
+            x: coord.x,
+            y: coord.y,
+          },
+          currentPlayer: currentPlayer.indexPlayer,
+          status: coord.status,
+        }),
+        id: 0,
+      };
+
+      connection1.send(JSON.stringify(response));
+      connection2.send(JSON.stringify(response));
+    }
     playerTurn(connection1, connection2, currentPlayer.indexPlayer);
   } else {
-    playerTurn(connection1, connection2, enemy.indexPlayer);
-
     currentGames = currentGames.map((game) => {
       if (game.indexPlayer === currentPlayer.indexPlayer) {
         return { ...game, turn: false };
@@ -326,5 +384,57 @@ const handleAttack = (request: Request) => {
 
       return game;
     });
+
+    const response: Response = {
+      type: 'attack',
+      data: JSON.stringify({
+        position: {
+          x: currentPlayer.x,
+          y: currentPlayer.y,
+        },
+        currentPlayer: currentPlayer.indexPlayer,
+        status: status,
+      }),
+      id: 0,
+    };
+
+    connection1.send(JSON.stringify(response));
+    connection2.send(JSON.stringify(response));
+    playerTurn(connection1, connection2, enemy.indexPlayer);
   }
 };
+
+const getUpdatedCoordinates = (
+  originalMatrix: MatrixCells[][],
+  updatedMatrix: MatrixCells[][],
+): UpdatedCoordinates[] => {
+  const updatedCoordinates: UpdatedCoordinates[] = [];
+
+  for (let y = 0; y < updatedMatrix.length; y += 1) {
+    for (let x = 0; x < updatedMatrix[y].length; x += 1) {
+      const coordinate = { x, y, status: updatedMatrix[y][x] };
+
+      if (originalMatrix[y][x] !== updatedMatrix[y][x]) {
+        updatedCoordinates.push(coordinate);
+      }
+    }
+  }
+
+  return updatedCoordinates;
+};
+
+function isAllShipsDestroyed(matrix: GameMatrix): boolean {
+  for (const row of matrix) {
+    for (const cell of row) {
+      if (
+        cell === 'small' ||
+        cell === 'medium' ||
+        cell === 'large' ||
+        cell === 'huge'
+      ) {
+        return false;
+      }
+    }
+  }
+  return true;
+}

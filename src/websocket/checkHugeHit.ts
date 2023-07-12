@@ -9,7 +9,7 @@ export function checkHugeHit(
   const numRows = matrix.length;
   const numCols = matrix[0].length;
 
-  const updatedMatrix = [...matrix];
+  const updatedMatrix: GameMatrix = matrix.map((rows) => [...rows]);
 
   let countLeft = 0;
   let countRight = 0;

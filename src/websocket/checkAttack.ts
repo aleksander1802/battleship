@@ -10,15 +10,16 @@ export function checkAttack(
   attackCoordinates: Coordinates,
 ) {
   const { x, y } = attackCoordinates;
-  const cellValue = matrix[y][x];
 
-  if (cellValue === 'miss' || cellValue === 'shot' || cellValue === 'killed') {
-    return { status: 'retry', updatedMatrix: matrix };
-  }
+  const updatedMatrix: GameMatrix = matrix.map((rows) => [...rows]);
 
-  const updatedMatrix: GameMatrix = [...matrix];
-
-  if (updatedMatrix[y][x] === 'small') {
+  if (
+    updatedMatrix[y][x] === 'miss' ||
+    updatedMatrix[y][x] === 'shot' ||
+    updatedMatrix[y][x] === 'killed'
+  ) {
+    return { status: 'retry', updatedMatrix };
+  } else if (updatedMatrix[y][x] === 'small') {
     updatedMatrix[y][x] = 'killed';
 
     updateSurroundingCells(updatedMatrix, x, y);

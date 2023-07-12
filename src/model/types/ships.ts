@@ -1,3 +1,5 @@
+import { MatrixCells } from './matrix.ts';
+
 export type ShipType = 'small' | 'medium' | 'large' | 'huge';
 
 interface Position {
@@ -33,6 +35,12 @@ export interface AddShipsRequest {
 export interface Coordinates {
   x: number;
   y: number;
+}
+
+export interface UpdatedCoordinates {
+  x: number;
+  y: number;
+  status: MatrixCells;
 }
 
 export interface PlayerCoordinates {
