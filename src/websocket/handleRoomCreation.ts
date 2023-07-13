@@ -4,16 +4,21 @@ import { players } from './server.ts';
 import { updateRoom } from './updateRoom.ts';
 
 export function handleRoomCreation(ws: CustomWebSocket) {
+  if (roomUsers.find((room) => room.roomId === ws.index)) return;
+
   const creator = players.find((player) => player.index === ws.index) as Player;
 
-  roomUsers.push(creator);
-
-  const response = {
-    type: 'create_room',
-    data: '',
+  const newRoom = {
+    roomId: creator.index,
+    roomUsers: [
+      {
+        name: creator.name,
+        index: creator.index,
+      },
+    ],
   };
 
-  ws.send(JSON.stringify(response));
+  roomUsers.push(newRoom);
 
-  updateRoom(creator.index);
+  updateRoom();
 }

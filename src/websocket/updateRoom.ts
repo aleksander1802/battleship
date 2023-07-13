@@ -1,12 +1,9 @@
 import { connections, roomUsers } from './server.ts';
 
-export const updateRoom = (roomId: string) => {
-  const update = JSON.stringify([
-    {
-      roomId,
-      roomUsers,
-    },
-  ]);
+export const updateRoom = () => {
+  const creator = roomUsers.filter((room) => room.roomUsers.length === 1);
+
+  const update = JSON.stringify(creator);
 
   const response = {
     type: 'update_room',

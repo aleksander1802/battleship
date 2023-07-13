@@ -1,9 +1,12 @@
 import {
+  AttackFeedback,
   CustomWebSocket,
   FinishMessage,
+  IndexRoom,
   Player,
   Request,
-  RoomUsers,
+  Room,
+  Winner,
 } from '../model/types/index.ts';
 
 import { WebSocketServer } from 'ws';
@@ -14,7 +17,6 @@ import {
   Coordinates,
   PlayerCoordinates,
   Ship,
-  Status,
   UpdatedCoordinates,
 } from '../../src/model/types/ships.ts';
 
@@ -27,13 +29,15 @@ import {
 } from '../../src/model/types/matrix.ts';
 import { createMatrix } from './matrixCreate.ts';
 import { checkAttack } from './checkAttack.ts';
+import { updateRoom } from './updateRoom.ts';
 
 const webSocketPort = 3000;
 
 export let players: Player[] = [];
 export let connections: CustomWebSocket[] = [];
-export let roomUsers: RoomUsers[] = [];
+export let roomUsers: Room[] = [];
 let currentGames: PlayerMatrixForTheGame[] = [];
+const winners: Winner[] = [];
 
 export const wss = new WebSocketServer({
   port: webSocketPort,
@@ -58,8 +62,9 @@ wss.on('connection', (ws: CustomWebSocket) => {
     connections = connections.filter(
       (connection) => connection.index !== ws.index,
     );
-    roomUsers = roomUsers.filter((room) => room.index !== ws.index);
+    roomUsers = roomUsers.filter((room) => room.roomId !== ws.index);
     players = players.filter((player) => player.index !== ws.index);
+    updateRoom();
   });
 });
 
@@ -74,66 +79,85 @@ function handleRequest(ws: CustomWebSocket, request: Request) {
       handleRoomCreation(ws);
       break;
     case 'add_user_to_room':
-      addUserToRoomAndStartTheGame(ws);
+      addUserToRoomAndStartTheGame(ws, request);
       break;
     case 'add_ships':
-      addShips(ws, request);
+      addShips(request);
       break;
     case 'attack':
-      handleAttack(request);
+      handleAttack(request, false);
+      break;
+    case 'randomAttack':
+      handleAttack(request, true);
       break;
   }
 }
 
-const addUserToRoomAndStartTheGame = (ws: CustomWebSocket) => {
-  addUserToExistRoom(ws);
-  placementOfShipsForTheGame(ws);
+const addUserToRoomAndStartTheGame = (
+  ws: CustomWebSocket,
+  request: Request,
+) => {
+  addUserToExistRoom(ws, request);
 };
 
-const addUserToExistRoom = (ws: CustomWebSocket) => {
-  if (roomUsers.length === 2) return;
+const addUserToExistRoom = (ws: CustomWebSocket, request: Request) => {
+  const roomIndex = JSON.parse(request.data) as IndexRoom;
 
-  const creator = players.find(
-    (player) => player.index === roomUsers[0].index,
-  ) as Player;
+  const isThePlayerTheCreatorOfTheRoom = roomIndex.indexRoom === ws.index;
+
+  if (isThePlayerTheCreatorOfTheRoom) return;
 
   const response = {
     type: 'add_user_to_room',
     data: JSON.stringify({
-      indexRoom: creator.index,
+      indexRoom: roomIndex,
     }),
     id: 0,
   };
 
-  const addUserToRoom = [...players].filter(
-    (player) => player.index !== creator.index,
-  )[0];
-
-  roomUsers.push(addUserToRoom);
-
-  ws.send(JSON.stringify(response));
-};
-
-const placementOfShipsForTheGame = (ws: CustomWebSocket) => {
-  const creator = roomUsers.find(
+  const addPlayerToRoom = players.find(
     (player) => player.index === ws.index,
   ) as Player;
 
-  const dataID1 = roomUsers.filter(
-    (player) => player.index === creator.index,
-  )[0];
-  const dataID2 = roomUsers.filter(
+  const theRoomToWhichWeAddThePlayer = roomUsers.find(
+    (room) => room.roomId === roomIndex.indexRoom,
+  ) as Room;
+
+  if (roomUsers.find((room) => room.roomId === addPlayerToRoom.index)) {
+    roomUsers = roomUsers.filter(
+      (room) => room.roomId !== addPlayerToRoom.index,
+    );
+  }
+
+  theRoomToWhichWeAddThePlayer.roomUsers.push(addPlayerToRoom);
+
+  ws.send(JSON.stringify(response));
+  updateRoom();
+  placementOfShipsForTheGame(request);
+};
+
+const placementOfShipsForTheGame = (request: Request) => {
+  const req = JSON.parse(request.data) as IndexRoom;
+  const currentRoom = roomUsers.find(
+    (room) => room.roomId === req.indexRoom,
+  ) as Room;
+
+  const creator = currentRoom.roomUsers.find(
+    (player) => player.index === req.indexRoom,
+  ) as Player;
+
+  const secondPlayer = currentRoom.roomUsers.filter(
     (player) => player.index !== creator.index,
   )[0];
 
   const data1 = JSON.stringify({
     idGame: creator.index,
-    idPlayer: dataID1.index,
+    idPlayer: creator.index,
   });
 
   const data2 = JSON.stringify({
     idGame: creator.index,
-    idPlayer: dataID2.index,
+    idPlayer: secondPlayer.index,
   });
 
   const response1 = {
@@ -148,36 +172,40 @@ const placementOfShipsForTheGame = (ws: CustomWebSocket) => {
     id: 0,
   };
 
-  const connection1 = connections.filter(
+  const connection1 = connections.find(
     (item) => item.index === creator.index,
-  )[0];
+  ) as CustomWebSocket;
 
-  const connection2 = connections.filter(
-    (item) => item.index !== creator.index,
-  )[0];
+  const connection2 = connections.find(
+    (item) => item.index === secondPlayer.index,
+  ) as CustomWebSocket;
+
   connection1.send(JSON.stringify(response1));
   connection2.send(JSON.stringify(response2));
 
-  roomUsers.length = 0;
+  roomUsers = roomUsers.filter((room) => room.roomId !== currentRoom.roomId);
+
+  updateRoom();
 };
 
-const addShips = (ws: CustomWebSocket, request: AddShipsRequest) => {
-  const ShipsData = JSON.parse(request.data) as AddShipsData;
-  const ships: Ship[] = ShipsData.ships;
+const addShips = (request: AddShipsRequest) => {
+  const shipsData = JSON.parse(request.data) as AddShipsData;
+
+  const ships: Ship[] = shipsData.ships;
 
   const matrix = createMatrix(ships);
 
   const player: PlayerMatrixForTheGame = {
-    currentGameId: ShipsData.gameId,
+    currentGameId: shipsData.gameId,
     ships: matrix,
-    indexPlayer: ShipsData.indexPlayer,
+    indexPlayer: shipsData.indexPlayer,
     turn: false,
   };
 
   currentGames.push(player);
 
   const arrayForGameStarting: PlayerMatrixForTheGame[] = currentGames.filter(
-    (game) => game.currentGameId,
+    (game) => game.currentGameId === shipsData.gameId,
   );
 
   if (arrayForGameStarting.length === 2) {
@@ -191,10 +219,12 @@ const startTheGame = (playersInGame: PlayerMatrixForTheGame[]) => {
   ) as PlayerMatrixForTheGame;
 
   const secondPlayer = playersInGame.filter(
-    (client) => client.indexPlayer !== gameCreator.indexPlayer,
-  )[0] as PlayerMatrixForTheGame;
+    (client) =>
+      client.indexPlayer !== gameCreator.indexPlayer &&
+      gameCreator.currentGameId === gameCreator.indexPlayer,
+  )[0];
 
-  const currentClientData = JSON.stringify({
+  const creatorClientData = JSON.stringify({
     ships: gameCreator.ships,
     currentPlayerIndex: gameCreator.indexPlayer,
   });
@@ -205,7 +235,7 @@ const startTheGame = (playersInGame: PlayerMatrixForTheGame[]) => {
 
   const response1 = {
     type: 'start_game',
-    data: currentClientData,
+    data: creatorClientData,
     id: 0,
   };
 
@@ -248,12 +278,9 @@ const playerTurn = (
   secondPlayer.send(JSON.stringify(response));
 };
 
-const handleAttack = (request: Request) => {
+const handleAttack = (request: Request, bot: boolean) => {
   const currentPlayer: PlayerCoordinates = JSON.parse(request.data);
-  const coordinates: Coordinates = {
-    x: currentPlayer.x,
-    y: currentPlayer.y,
-  };
+  let coordinates: Coordinates;
 
   const currentGameArray = currentGames.filter(
     (game) => game.currentGameId === currentPlayer.gameId,
@@ -267,10 +294,14 @@ const handleAttack = (request: Request) => {
 
   if (enemy.turn) return;
 
-  type AttackFeedback = {
-    status: Status;
-    updatedMatrix: MatrixCells[][];
-  };
+  if (bot) {
+    coordinates = generateRandomCoordinates(enemyShips);
+  } else {
+    coordinates = {
+      x: currentPlayer.x,
+      y: currentPlayer.y,
+    };
+  }
 
   const { status, updatedMatrix } = checkAttack(
     enemyShips,
@@ -305,10 +336,7 @@ const handleAttack = (request: Request) => {
     const response: Response = {
       type: 'attack',
       data: JSON.stringify({
-        position: {
-          x: currentPlayer.x,
-          y: currentPlayer.y,
-        },
+        position: coordinates,
         currentPlayer: currentPlayer.indexPlayer,
         status: cell,
       }),
@@ -322,10 +350,7 @@ const handleAttack = (request: Request) => {
     const response: Response = {
       type: 'attack',
       data: JSON.stringify({
-        position: {
-          x: currentPlayer.x,
-          y: currentPlayer.y,
-        },
+        position: coordinates,
         currentPlayer: currentPlayer.indexPlayer,
         status: status,
       }),
@@ -336,23 +361,6 @@ const handleAttack = (request: Request) => {
     connection2.send(JSON.stringify(response));
     playerTurn(connection1, connection2, currentPlayer.indexPlayer);
   } else if (status === 'killed') {
-    const destroyed = isAllShipsDestroyed(updatedMatrix);
-    if (destroyed) {
-      const data = JSON.stringify({
-        winPlayer: currentPlayer.indexPlayer,
-      });
-
-      const response: FinishMessage = {
-        type: 'finish',
-        data,
-        id: 0,
-      };
-
-      connection1.send(JSON.stringify(response));
-      connection2.send(JSON.stringify(response));
-      return;
-    }
-
     const updatedCoordinates = getUpdatedCoordinates(enemyShips, updatedMatrix);
 
     for (let i = 0; i < updatedCoordinates.length; i++) {
@@ -373,6 +381,25 @@ const handleAttack = (request: Request) => {
       connection1.send(JSON.stringify(response));
       connection2.send(JSON.stringify(response));
     }
+
+    const destroyed = isAllShipsDestroyed(updatedMatrix);
+    if (destroyed) {
+      const data = JSON.stringify({
+        winPlayer: currentPlayer.indexPlayer,
+      });
+
+      const response: FinishMessage = {
+        type: 'finish',
+        data,
+        id: 0,
+      };
+
+      connection1.send(JSON.stringify(response));
+      connection2.send(JSON.stringify(response));
+
+      updateWinners(currentPlayer.indexPlayer);
+      return;
+    }
     playerTurn(connection1, connection2, currentPlayer.indexPlayer);
   } else {
     currentGames = currentGames.map((game) => {
@@ -388,10 +415,7 @@ const handleAttack = (request: Request) => {
     const response: Response = {
       type: 'attack',
       data: JSON.stringify({
-        position: {
-          x: currentPlayer.x,
-          y: currentPlayer.y,
-        },
+        position: coordinates,
         currentPlayer: currentPlayer.indexPlayer,
         status: status,
       }),
@@ -438,3 +462,46 @@ function isAllShipsDestroyed(matrix: GameMatrix): boolean {
   }
   return true;
 }
+
+function generateRandomCoordinates(matrix: MatrixCells[][]): {
+  x: number;
+  y: number;
+} {
+  const excludedValues = ['miss', 'killed', 'shot'];
+
+  const validCoordinates = [];
+  for (let y = 0; y < matrix.length; y += 1) {
+    for (let x = 0; x < matrix[y].length; x += 1) {
+      if (!excludedValues.includes(matrix[y][x])) {
+        validCoordinates.push({ x, y });
+      }
+    }
+  }
+
+  const randomIndex = Math.floor(Math.random() * validCoordinates.length);
+  return validCoordinates[randomIndex];
+}
+
+const updateWinners = (id: string) => {
+  const winner = players.find((player) => player.index === id) as Player;
+
+  players = players.map((player) => {
+    if (player.index === winner.index) {
+      return { ...player, wins: (player.wins += 1) };
+    }
+
+    return player;
+  });
+
+  winners.push(winner);
+
+  const response = {
+    type: 'update_winners',
+    data: JSON.stringify(winners),
+    id: 0,
+  };
+
+  connections.forEach((ws) => {
+    ws.send(JSON.stringify(response));
+  });
+};
