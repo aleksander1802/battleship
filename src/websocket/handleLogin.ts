@@ -4,10 +4,10 @@ import {
   Player,
   Request,
 } from '../../src/model/types/index.ts';
-import { players } from './server.ts';
+import { connections, players } from './server.ts';
 
 export function handleLogin(ws: CustomWebSocket, request: Request) {
-  const { name, password, index }: Player = JSON.parse(request.data);
+  const { name, password }: Player = JSON.parse(request.data);
 
   const foundPlayer = players.find(
     (player) => player.name === name && player.password === password,
@@ -27,11 +27,19 @@ export function handleLogin(ws: CustomWebSocket, request: Request) {
     ws.send(JSON.stringify(response));
     return;
   } else {
+    const loginPlayer = players.find(
+      (player) => player.name === name && player.password === password,
+    ) as Player;
+
+    ws.index = loginPlayer?.index;
+
+    connections.push(ws);
+
     const response = {
       type: 'reg',
       data: JSON.stringify({
         name: name,
-        index: index,
+        index: ws.index,
         error: false,
         errorText: '',
       }),
