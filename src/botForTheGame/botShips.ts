@@ -88,23 +88,23 @@ function isShipPlacementValid(
   const matrixSize = matrix.length;
 
   if (isShipHorizontal(ShipType.Huge) && x + length > matrixSize) {
-    return false; // корабль выходит за пределы матрицы
+    return false;
   }
 
   if (!isShipHorizontal(ShipType.Huge) && y + length > matrixSize) {
-    return false; // корабль выходит за пределы матрицы
+    return false;
   }
 
   if (isShipHorizontal(ShipType.Huge)) {
     for (let i = x; i < x + length; i++) {
       if (matrix[y][i] !== 'empty') {
-        return false; // пересечение с другим кораблем
+        return false;
       }
     }
   } else {
     for (let i = y; i < y + length; i++) {
       if (matrix[i][x] !== 'empty') {
-        return false; // пересечение с другим кораблем
+        return false;
       }
     }
   }
@@ -128,4 +128,3 @@ function shuffleArray<T>(array: T[]): T[] {
   }
   return shuffledArray;
 }
-

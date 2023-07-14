@@ -87,7 +87,11 @@ export function handleRequest(ws: CustomWebSocket, request: Request) {
       addShips(request);
       break;
     case 'attack':
-      handleAttack(request, false);
+      if (isGameWithBot(request)) {
+        handleBotAttack(request);
+      } else {
+        handleAttack(request, false);
+      }
       break;
     case 'randomAttack':
       handleAttack(request, true);
@@ -600,10 +604,7 @@ const startGameWithBot = (arrayForGameWithBot: PlayerMatrixForTheGame[]) => {
   playerTurnWithBot(connection1, gameCreator.indexPlayer);
 };
 
-const playerTurnWithBot = (
-  firstPlayer: CustomWebSocket,
-  index: string,
-) => {
+const playerTurnWithBot = (firstPlayer: CustomWebSocket, index: string) => {
   const response = {
     type: 'turn',
     data: JSON.stringify({
@@ -613,4 +614,20 @@ const playerTurnWithBot = (
   };
 
   firstPlayer.send(JSON.stringify(response));
+};
+
+const isGameWithBot = (request: Request) => {
+  const data = JSON.parse(request.data) as PlayerCoordinates;
+
+  const bot = currentGames
+    .filter((game) => game.currentGameId === data.gameId)
+    .filter((player) => player.currentGameId !== player.indexPlayer)[0];
+
+  return (
+    players.find((player) => player.index === bot.indexPlayer)?.name === 'BOT'
+  );
+};
+
+const handleBotAttack = (request: Request) => {
+  console.log('BOTOTOTOTOTOTOTOTO');
 };

@@ -24,7 +24,7 @@ export function handleRegistration(ws: CustomWebSocket, request: Request) {
     };
 
     ws.send(JSON.stringify(response));
-  } else if (empty.test(name) || empty.test(password)) {
+  } else if (!empty.test(name) || !empty.test(password)) {
     const response = {
       type: 'reg',
       data: JSON.stringify({
