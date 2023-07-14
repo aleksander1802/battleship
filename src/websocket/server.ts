@@ -10,7 +10,7 @@ import {
 } from '../model/types/index.ts';
 
 import { WebSocketServer } from 'ws';
-import { v4 as uuidv4 } from 'uuid';
+
 import {
   AddShipsData,
   AddShipsRequest,
@@ -30,6 +30,9 @@ import {
 import { createMatrix } from './matrixCreate.ts';
 import { checkAttack } from './checkAttack.ts';
 import { updateRoom } from './updateRoom.ts';
+import { handleLogin } from './handleLogin.ts';
+import { playerExists } from '../db/db.ts';
+import { generateBotShips } from '../botForTheGame/botShips.ts';
 
 const webSocketPort = 3000;
 
@@ -37,19 +40,14 @@ export let players: Player[] = [];
 export let connections: CustomWebSocket[] = [];
 export let roomUsers: Room[] = [];
 let currentGames: PlayerMatrixForTheGame[] = [];
-const winners: Winner[] = [];
+let winners: Winner[] = [];
 
 export const wss = new WebSocketServer({
   port: webSocketPort,
 });
 
 wss.on('connection', (ws: CustomWebSocket) => {
-  console.log('A client connected');
-
-  const userId = uuidv4();
-  ws.index = userId;
-
-  connections.push(ws);
+  console.log(`A client connected on the ${webSocketPort} webSocketPort`);
 
   ws.on('message', (message: string) => {
     const request = JSON.parse(message);
@@ -63,17 +61,21 @@ wss.on('connection', (ws: CustomWebSocket) => {
       (connection) => connection.index !== ws.index,
     );
     roomUsers = roomUsers.filter((room) => room.roomId !== ws.index);
-    players = players.filter((player) => player.index !== ws.index);
+
     updateRoom();
   });
 });
 
-function handleRequest(ws: CustomWebSocket, request: Request) {
+export function handleRequest(ws: CustomWebSocket, request: Request) {
   console.log(request);
 
   switch (request.type) {
     case 'reg':
-      handleRegistration(ws, request);
+      if (playerExists(request)) {
+        handleLogin(ws, request);
+      } else {
+        handleRegistration(ws, request);
+      }
       break;
     case 'create_room':
       handleRoomCreation(ws);
@@ -89,6 +91,9 @@ function handleRequest(ws: CustomWebSocket, request: Request) {
       break;
     case 'randomAttack':
       handleAttack(request, true);
+      break;
+    case 'single_play':
+      singlePlay(ws);
       break;
   }
 }
@@ -208,7 +213,13 @@ const addShips = (request: AddShipsRequest) => {
     (game) => game.currentGameId === shipsData.gameId,
   );
 
-  if (arrayForGameStarting.length === 2) {
+  const currentBot = players.find((player) => player.name === 'BOT') as Player;
+
+  const isGameWithBot = arrayForGameStarting.some(
+    (game) => game.indexPlayer === currentBot.index,
+  );
+
+  if (arrayForGameStarting.length === 2 && !isGameWithBot) {
     startTheGame(arrayForGameStarting);
   }
 };
@@ -398,6 +409,9 @@ const handleAttack = (request: Request, bot: boolean) => {
       connection2.send(JSON.stringify(response));
 
       updateWinners(currentPlayer.indexPlayer);
+      currentGames = currentGames.filter(
+        (game) => game.currentGameId !== currentPlayer.indexPlayer,
+      );
       return;
     }
     playerTurn(connection1, connection2, currentPlayer.indexPlayer);
@@ -486,14 +500,27 @@ const updateWinners = (id: string) => {
   const winner = players.find((player) => player.index === id) as Player;
 
   players = players.map((player) => {
-    if (player.index === winner.index) {
+    if (player.index === id) {
       return { ...player, wins: (player.wins += 1) };
     }
 
     return player;
   });
 
-  winners.push(winner);
+  const isWinnerInTheArray = winners.find(
+    (player) => player.name === winner.name,
+  );
+
+  if (isWinnerInTheArray) {
+    winners = winners.map((player) => {
+      if (player.name === winner.name) {
+        return { ...player, wins: (player.wins += 1) };
+      }
+      return player;
+    });
+  } else {
+    winners.push(winner);
+  }
 
   const response = {
     type: 'update_winners',
@@ -504,4 +531,45 @@ const updateWinners = (id: string) => {
   connections.forEach((ws) => {
     ws.send(JSON.stringify(response));
   });
+};
+
+const singlePlay = (ws: CustomWebSocket) => {
+  const currentBot = players.find((player) => player.name === 'BOT') as Player;
+
+  const data1 = JSON.stringify({
+    idGame: ws.index,
+    idPlayer: ws.index,
+  });
+
+  const response1 = {
+    type: 'create_game',
+    data: data1,
+    id: 0,
+  };
+
+  const connection1 = connections.find(
+    (item) => item.index === ws.index,
+  ) as CustomWebSocket;
+
+  const matrix = generateBotShips();
+
+  const bot: PlayerMatrixForTheGame = {
+    currentGameId: ws.index,
+    ships: matrix,
+    indexPlayer: currentBot.index,
+    turn: false,
+  };
+
+  currentGames.push(bot);
+
+  connection1.send(JSON.stringify(response1));
+
+  // const bot: PlayerMatrixForTheGame = {
+  //   currentGameId: currentBot.gameId,
+  //   ships: matrix,
+  //   indexPlayer: shipsData.indexPlayer,
+  //   turn: false,
+  // };
+
+  // currentGames.push(player);
 };

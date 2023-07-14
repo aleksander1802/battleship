@@ -1,53 +1,45 @@
-// import { Player } from '../../src/model/types/index.ts';
-import { players } from '../../src/websocket/server.ts';
+import {
+  CustomWebSocket,
+  Player,
+  Request,
+} from '../../src/model/types/index.ts';
+import { connections, players } from '../../src/websocket/server.ts';
+import { v4 as uuidv4 } from 'uuid';
 
-export function playerExists(name: string) {
+export function playerExists(request: Request) {
+  const { name }: Player = JSON.parse(request.data);
   return players.some((player) => player.name === name);
 }
 
-export function registerPlayer(name: string, password: string, index: string) {
-  
-    const newPlayer = {
+export function registerPlayer(
+  name: string,
+  password: string,
+  ws: CustomWebSocket,
+) {
+  const userId = uuidv4();
+
+  ws.index = userId;
+
+  const newPlayer = {
+    name,
+    password,
+    index: ws.index,
+    wins: 0,
+  };
+
+  players.push(newPlayer);
+  connections.push(ws);
+
+  const response = {
+    type: 'reg',
+    data: JSON.stringify({
       name,
-      password,
-      index,
-      wins: 0,
-    };
+      index: ws.index,
+      error: false,
+      errorText: '',
+    }),
+    id: 0,
+  };
 
-    players.push(newPlayer);
-
-    const response = {
-      type: 'reg',
-      data: JSON.stringify({
-        name,
-        index,
-        error: false,
-        errorText: '',
-      }),
-      id: 0,
-    };
-
-    return response;
-  
+  return response;
 }
-
-// export function loginPlayer(index: string) {
-//   const foundPlayer = players.find(
-//     (player) => player.index === index,
-//   ) as Player;
-
-//   if (!foundPlayer) {
-//     return { index: -1, error: true, errorText: 'Invalid credentials' };
-//   }
-
-//   const response = {
-//     type: 'reg',
-//     data: JSON.stringify({
-//       name: foundPlayer.name,
-//       password: foundPlayer.password,
-//     }),
-//     id: 0,
-//   };
-
-//   return response;
-// }
