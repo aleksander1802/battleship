@@ -33,6 +33,7 @@ import { updateRoom } from './updateRoom.ts';
 import { handleLogin } from './handleLogin.ts';
 import { playerExists } from '../db/db.ts';
 import { generateBotShips } from '../botForTheGame/botShips.ts';
+import { winnerUpdateResponse } from './updateWinners.ts';
 
 const webSocketPort = 3000;
 
@@ -40,7 +41,7 @@ export let players: Player[] = [];
 export let connections: CustomWebSocket[] = [];
 export let roomUsers: Room[] = [];
 let currentGames: PlayerMatrixForTheGame[] = [];
-let winners: Winner[] = [];
+export let winners: Winner[] = [];
 
 export const wss = new WebSocketServer({
   port: webSocketPort,
@@ -63,6 +64,8 @@ wss.on('connection', (ws: CustomWebSocket) => {
     roomUsers = roomUsers.filter((room) => room.roomId !== ws.index);
 
     updateRoom();
+
+    flawlessWictory(ws);
   });
 });
 
@@ -76,6 +79,8 @@ export function handleRequest(ws: CustomWebSocket, request: Request) {
       } else {
         handleRegistration(ws, request);
       }
+      updateRoom();
+      winnerUpdateResponse();
       break;
     case 'create_room':
       handleRoomCreation(ws);
@@ -101,6 +106,46 @@ export function handleRequest(ws: CustomWebSocket, request: Request) {
       break;
   }
 }
+
+const flawlessWictory = (ws: CustomWebSocket) => {
+  const isThePlayerWasInTheGame = currentGames.filter(
+    (game) => game.currentGameId === ws.index,
+  );
+
+  if (isThePlayerWasInTheGame.length === 2) {
+    const playerWhoLeftTheGame = isThePlayerWasInTheGame.find(
+      (player) => player.indexPlayer === ws.index,
+    ) as PlayerMatrixForTheGame;
+
+    const winnerOfTheGame = isThePlayerWasInTheGame.filter(
+      (player) => player.indexPlayer !== playerWhoLeftTheGame.indexPlayer,
+    )[0];
+
+    currentGames = currentGames.filter(
+      (game) => game.currentGameId !== playerWhoLeftTheGame.currentGameId,
+    );
+
+    const connection1 = connections.find(
+      (ws) => ws.index === winnerOfTheGame.indexPlayer,
+    );
+
+    const data = JSON.stringify({
+      winPlayer: winnerOfTheGame.indexPlayer,
+    });
+
+    const response: FinishMessage = {
+      type: 'finish',
+      data,
+      id: 0,
+    };
+
+    if (connection1) {
+      connection1.send(JSON.stringify(response));
+    }
+
+    updateWinners(winnerOfTheGame.indexPlayer);
+  }
+};
 
 const addUserToRoomAndStartTheGame = (
   ws: CustomWebSocket,
@@ -313,6 +358,8 @@ const handleAttack = (request: Request, bot: boolean) => {
     (enemy) => enemy.indexPlayer !== currentPlayer.indexPlayer,
   )[0];
 
+  if (enemy === undefined) return;
+
   const enemyShips = enemy.ships.map((rows) => [...rows]);
 
   if (enemy.turn) return;
@@ -330,8 +377,6 @@ const handleAttack = (request: Request, bot: boolean) => {
     enemyShips,
     coordinates,
   ) as AttackFeedback;
-
-  console.table(updatedMatrix);
 
   currentGames = currentGames.map((item) =>
     item.indexPlayer === enemy.indexPlayer
@@ -508,7 +553,7 @@ function generateRandomCoordinates(matrix: MatrixCells[][]): {
   return validCoordinates[randomIndex];
 }
 
-const updateWinners = (id: string) => {
+export const updateWinners = (id: string) => {
   const winner = players.find((player) => player.index === id) as Player;
 
   players = players.map((player) => {
@@ -534,18 +579,15 @@ const updateWinners = (id: string) => {
     winners.push(winner);
   }
 
-  const response = {
-    type: 'update_winners',
-    data: JSON.stringify(winners),
-    id: 0,
-  };
-
-  connections.forEach((ws) => {
-    ws.send(JSON.stringify(response));
-  });
+  winnerUpdateResponse();
 };
 
 const singlePlay = (ws: CustomWebSocket) => {
+  if (roomUsers.some((room) => room.roomId === ws.index)) {
+    roomUsers = roomUsers.filter((room) => room.roomId !== ws.index);
+    updateRoom();
+  }
+
   const currentBot = players.find((player) => player.name === 'BOT') as Player;
 
   const data1 = JSON.stringify({
@@ -623,11 +665,157 @@ const isGameWithBot = (request: Request) => {
     .filter((game) => game.currentGameId === data.gameId)
     .filter((player) => player.currentGameId !== player.indexPlayer)[0];
 
-  return (
-    players.find((player) => player.index === bot.indexPlayer)?.name === 'BOT'
-  );
+  if (bot === undefined) return;
+
+  const botIndex = players.find((player) => player.index === bot.indexPlayer);
+
+  if (botIndex !== undefined && botIndex.name === 'BOT') {
+    return true;
+  } else {
+    return false;
+  }
 };
 
 const handleBotAttack = (request: Request) => {
-  console.log('BOTOTOTOTOTOTOTOTO');
+  const currentPlayer = JSON.parse(request.data) as PlayerCoordinates;
+
+  const coordinates = {
+    x: currentPlayer.x,
+    y: currentPlayer.y,
+  };
+
+  const currentGame = currentGames.filter(
+    (player) => player.currentGameId === currentPlayer.gameId,
+  );
+
+  const enemy = currentGame.filter(
+    (game) => game.indexPlayer !== currentPlayer.indexPlayer,
+  )[0];
+
+  if (enemy === undefined) return;
+
+  const enemyShips = enemy.ships;
+
+  console.table(enemyShips);
+
+  const { status, updatedMatrix } = checkAttack(
+    enemyShips,
+    coordinates,
+  ) as AttackFeedback;
+
+  currentGames = currentGames.map((item) =>
+    item.indexPlayer === enemy.indexPlayer
+      ? { ...item, ships: updatedMatrix }
+      : item,
+  );
+
+  const connection1 = connections.find(
+    (item) => item.index === currentPlayer.indexPlayer,
+  ) as CustomWebSocket;
+
+  type Response = {
+    type: string;
+    data: string;
+    id: number;
+  };
+
+  if (status === 'retry') {
+    const cell = updatedMatrix[currentPlayer.y][currentPlayer.x];
+
+    const response: Response = {
+      type: 'attack',
+      data: JSON.stringify({
+        position: coordinates,
+        currentPlayer: currentPlayer.indexPlayer,
+        status: cell,
+      }),
+      id: 0,
+    };
+
+    connection1.send(JSON.stringify(response));
+    // connection2.send(JSON.stringify(response));
+    // playerTurn(connection1, connection2, currentPlayer.indexPlayer);
+  } else if (status === 'shot') {
+    const response: Response = {
+      type: 'attack',
+      data: JSON.stringify({
+        position: coordinates,
+        currentPlayer: currentPlayer.indexPlayer,
+        status: status,
+      }),
+      id: 0,
+    };
+
+    connection1.send(JSON.stringify(response));
+    // connection2.send(JSON.stringify(response));
+    // playerTurn(connection1, connection2, currentPlayer.indexPlayer);
+  } else if (status === 'killed') {
+    const updatedCoordinates = getUpdatedCoordinates(enemyShips, updatedMatrix);
+
+    for (let i = 0; i < updatedCoordinates.length; i++) {
+      const coord = updatedCoordinates[i];
+      const response: Response = {
+        type: 'attack',
+        data: JSON.stringify({
+          position: {
+            x: coord.x,
+            y: coord.y,
+          },
+          currentPlayer: currentPlayer.indexPlayer,
+          status: coord.status,
+        }),
+        id: 0,
+      };
+
+      connection1.send(JSON.stringify(response));
+      // connection2.send(JSON.stringify(response));
+    }
+
+    const destroyed = isAllShipsDestroyed(updatedMatrix);
+    if (destroyed) {
+      const data = JSON.stringify({
+        winPlayer: currentPlayer.indexPlayer,
+      });
+
+      const response: FinishMessage = {
+        type: 'finish',
+        data,
+        id: 0,
+      };
+
+      connection1.send(JSON.stringify(response));
+      // connection2.send(JSON.stringify(response));
+
+      updateWinners(currentPlayer.indexPlayer);
+      currentGames = currentGames.filter(
+        (game) => game.currentGameId !== currentPlayer.indexPlayer,
+      );
+      return;
+    }
+    // playerTurn(connection1, connection2, currentPlayer.indexPlayer);
+  } else {
+    // currentGames = currentGames.map((game) => {
+    //   if (game.indexPlayer === currentPlayer.indexPlayer) {
+    //     return { ...game, turn: false };
+    //   } else if (game.indexPlayer === enemy.indexPlayer) {
+    //     return { ...game, turn: true };
+    //   }
+
+    //   return game;
+    // });
+
+    const response: Response = {
+      type: 'attack',
+      data: JSON.stringify({
+        position: coordinates,
+        currentPlayer: currentPlayer.indexPlayer,
+        status: status,
+      }),
+      id: 0,
+    };
+
+    connection1.send(JSON.stringify(response));
+    // connection2.send(JSON.stringify(response));
+    // playerTurn(connection1, connection2, enemy.indexPlayer);
+  }
 };
