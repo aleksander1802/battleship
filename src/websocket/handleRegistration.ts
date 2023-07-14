@@ -1,3 +1,4 @@
+import { botCreation } from '../botForTheGame/dirtyBot.ts';
 import {
   CustomWebSocket,
   Player,
@@ -5,12 +6,14 @@ import {
 } from '../../src/model/types/index.ts';
 
 import { registerPlayer } from '../db/db.ts';
+import { players } from './server.ts';
 
 export function handleRegistration(ws: CustomWebSocket, request: Request) {
   const { name, password }: Player = JSON.parse(request.data);
-  
 
-  if (name.length < 5) {
+  const empty = /^\S+$/;
+
+  if (name.length < 5 || password.length < 5) {
     const response = {
       type: 'reg',
       data: JSON.stringify({
@@ -21,12 +24,13 @@ export function handleRegistration(ws: CustomWebSocket, request: Request) {
     };
 
     ws.send(JSON.stringify(response));
-  } else if (password.length < 5) {
+  } else if (empty.test(name) || empty.test(password)) {
     const response = {
       type: 'reg',
       data: JSON.stringify({
         error: true,
-        errorText: 'Minimum 5 characters',
+        errorText:
+          'Please note that your password or username should not contain any spaces.',
       }),
       id: 0,
     };
@@ -37,10 +41,6 @@ export function handleRegistration(ws: CustomWebSocket, request: Request) {
 
     ws.send(JSON.stringify(response));
 
-    // const loginResponse = loginPlayer(ws.index);
-
-    // ws.send(JSON.stringify(loginResponse));
+    botCreation(players);
   }
 }
-
-

@@ -222,6 +222,14 @@ const addShips = (request: AddShipsRequest) => {
   if (arrayForGameStarting.length === 2 && !isGameWithBot) {
     startTheGame(arrayForGameStarting);
   }
+
+  if (isGameWithBot) {
+    const arrayForGameWithBot = currentGames.filter(
+      (game) => game.currentGameId === shipsData.indexPlayer,
+    );
+
+    startGameWithBot(arrayForGameWithBot);
+  }
 };
 
 const startTheGame = (playersInGame: PlayerMatrixForTheGame[]) => {
@@ -563,13 +571,46 @@ const singlePlay = (ws: CustomWebSocket) => {
   currentGames.push(bot);
 
   connection1.send(JSON.stringify(response1));
+};
 
-  // const bot: PlayerMatrixForTheGame = {
-  //   currentGameId: currentBot.gameId,
-  //   ships: matrix,
-  //   indexPlayer: shipsData.indexPlayer,
-  //   turn: false,
-  // };
+const startGameWithBot = (arrayForGameWithBot: PlayerMatrixForTheGame[]) => {
+  const gameCreator = arrayForGameWithBot.find(
+    (client) => client.indexPlayer === client.currentGameId,
+  ) as PlayerMatrixForTheGame;
 
-  // currentGames.push(player);
+  const creatorClientData = JSON.stringify({
+    ships: gameCreator.ships,
+    currentPlayerIndex: gameCreator.indexPlayer,
+  });
+
+  const response1 = {
+    type: 'start_game',
+    data: creatorClientData,
+    id: 0,
+  };
+
+  const connection1 = connections.find(
+    (item) => item.index === gameCreator.indexPlayer,
+  ) as CustomWebSocket;
+
+  connection1.send(JSON.stringify(response1));
+
+  gameCreator.turn = true;
+
+  playerTurnWithBot(connection1, gameCreator.indexPlayer);
+};
+
+const playerTurnWithBot = (
+  firstPlayer: CustomWebSocket,
+  index: string,
+) => {
+  const response = {
+    type: 'turn',
+    data: JSON.stringify({
+      currentPlayer: index,
+    }),
+    id: 0,
+  };
+
+  firstPlayer.send(JSON.stringify(response));
 };
