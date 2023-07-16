@@ -1,0 +1,32 @@
+{
+  "compilerOptions": { 
+    "module": "ESNext",
+    "target": "ESNext",
+    "lib": ["esnext"],
+    "rootDir": ".",
+    "baseUrl": "./",
+    "sourceMap": true,
+    "outDir": "./dist",
+    "allowSyntheticDefaultImports": true,
+    "esModuleInterop": true,
+    "forceConsistentCasingInFileNames": true,
+    "strict": true,
+    "noImplicitAny": true,
+    "allowJs": true,
+    "skipLibCheck": true,
+    "resolveJsonModule": true,
+    "allowImportingTsExtensions": true,
+    "moduleResolution": "node",
+    "noEmit": true
+  },
+  "watch": true,
+  "ts-node": {
+    "transpileOnly": true,
+    "files": true,
+    "esm": true,
+    "compilerOptions": {
+      "module": "ESNext"
+    }
+  },
+  "exclude": ["node_modules"]
+}
