@@ -635,6 +635,8 @@ const handleBotAttack = (
 
     if (enemy === undefined) return;
 
+    if (enemy.turn) return;
+
     const enemyShips = enemy.ships;
 
     if (bot) {
