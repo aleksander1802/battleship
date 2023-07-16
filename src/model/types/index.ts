@@ -15,6 +15,12 @@ export interface Request {
   id: number;
 }
 
+export type Response = {
+  type: string;
+  data: string;
+  id: number;
+};
+
 export interface RoomUsers {
   name: string;
   index: string;

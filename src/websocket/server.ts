@@ -5,6 +5,7 @@ import {
   IndexRoom,
   Player,
   Request,
+  Response,
   Room,
   Winner,
 } from '../model/types/index.ts';
@@ -17,16 +18,11 @@ import {
   Coordinates,
   PlayerCoordinates,
   Ship,
-  UpdatedCoordinates,
 } from '../../src/model/types/ships.ts';
 
 import { handleRegistration } from './handleRegistration.ts';
 import { handleRoomCreation } from './handleRoomCreation.ts';
-import {
-  GameMatrix,
-  MatrixCells,
-  PlayerMatrixForTheGame,
-} from '../../src/model/types/matrix.ts';
+import { PlayerMatrixForTheGame } from '../../src/model/types/matrix.ts';
 import { createMatrix } from './matrixCreate.ts';
 import { checkAttack } from './checkAttack.ts';
 import { updateRoom } from './updateRoom.ts';
@@ -34,13 +30,18 @@ import { handleLogin } from './handleLogin.ts';
 import { playerExists } from '../db/db.ts';
 import { generateBotShips } from '../botForTheGame/botShips.ts';
 import { winnerUpdateResponse } from './updateWinners.ts';
+import { getUpdatedCoordinates } from './getUpdatedCoordinates.ts';
+import { isAllShipsDestroyed } from './isAllShipsDestroyed.ts';
+import { generateRandomCoordinates } from './generateRandomCoordinates.ts';
+import { playerTurn } from './playerTurn.ts';
+import { isGameWithBot } from './isGameWithBot.ts';
 
 const webSocketPort = 3000;
 
 export let players: Player[] = [];
 export let connections: CustomWebSocket[] = [];
 export let roomUsers: Room[] = [];
-let currentGames: PlayerMatrixForTheGame[] = [];
+export let currentGames: PlayerMatrixForTheGame[] = [];
 export let winners: Winner[] = [];
 
 export const wss = new WebSocketServer({
@@ -61,6 +62,7 @@ wss.on('connection', (ws: CustomWebSocket) => {
     connections = connections.filter(
       (connection) => connection.index !== ws.index,
     );
+
     roomUsers = roomUsers.filter((room) => room.roomId !== ws.index);
 
     updateRoom();
@@ -93,13 +95,17 @@ export function handleRequest(ws: CustomWebSocket, request: Request) {
       break;
     case 'attack':
       if (isGameWithBot(request)) {
-        handleBotAttack(request);
+        handleBotAttack(ws, request, false);
       } else {
         handleAttack(request, false);
       }
       break;
     case 'randomAttack':
-      handleAttack(request, true);
+      if (isGameWithBot(request)) {
+        handleBotAttack(ws, request, true);
+      } else {
+        handleAttack(request, true);
+      }
       break;
     case 'single_play':
       singlePlay(ws);
@@ -258,26 +264,29 @@ const addShips = (request: AddShipsRequest) => {
 
   currentGames.push(player);
 
-  const arrayForGameStarting: PlayerMatrixForTheGame[] = currentGames.filter(
-    (game) => game.currentGameId === shipsData.gameId,
+  const currentGame = currentGames.filter(
+    (game) => game.currentGameId === player.currentGameId,
   );
 
-  const currentBot = players.find((player) => player.name === 'BOT') as Player;
+  if (currentGame.length === 2) {
+    const bot1 = players.find(
+      (player) => player.index === currentGame[0].indexPlayer,
+    ) as Player;
+    const bot2 = players.find(
+      (player) => player.index === currentGame[1].indexPlayer,
+    ) as Player;
 
-  const isGameWithBot = arrayForGameStarting.some(
-    (game) => game.indexPlayer === currentBot.index,
-  );
+    if (bot1.name === 'BOT' || bot2?.name === 'BOT') {
+      startGameWithBot(currentGame);
+      console.log(currentGames);
+    } else {
+      const arrayForGameStarting: PlayerMatrixForTheGame[] =
+        currentGames.filter((game) => game.currentGameId === shipsData.gameId);
 
-  if (arrayForGameStarting.length === 2 && !isGameWithBot) {
-    startTheGame(arrayForGameStarting);
-  }
-
-  if (isGameWithBot) {
-    const arrayForGameWithBot = currentGames.filter(
-      (game) => game.currentGameId === shipsData.indexPlayer,
-    );
-
-    startGameWithBot(arrayForGameWithBot);
+      if (arrayForGameStarting.length === 2) {
+        startTheGame(arrayForGameStarting);
+      }
+    }
   }
 };
 
@@ -329,23 +338,6 @@ const startTheGame = (playersInGame: PlayerMatrixForTheGame[]) => {
   playerTurn(connection1, connection2, gameCreator.indexPlayer);
 };
 
-const playerTurn = (
-  firstPlayer: CustomWebSocket,
-  secondPlayer: CustomWebSocket,
-  index: string,
-) => {
-  const response = {
-    type: 'turn',
-    data: JSON.stringify({
-      currentPlayer: index,
-    }),
-    id: 0,
-  };
-
-  firstPlayer.send(JSON.stringify(response));
-  secondPlayer.send(JSON.stringify(response));
-};
-
 const handleAttack = (request: Request, bot: boolean) => {
   const currentPlayer: PlayerCoordinates = JSON.parse(request.data);
   let coordinates: Coordinates;
@@ -391,12 +383,6 @@ const handleAttack = (request: Request, bot: boolean) => {
   const connection2 = connections.find(
     (item) => item.index === enemy.indexPlayer,
   ) as CustomWebSocket;
-
-  type Response = {
-    type: string;
-    data: string;
-    id: number;
-  };
 
   if (status === 'retry') {
     const cell = updatedMatrix[currentPlayer.y][currentPlayer.x];
@@ -467,11 +453,13 @@ const handleAttack = (request: Request, bot: boolean) => {
 
       updateWinners(currentPlayer.indexPlayer);
       currentGames = currentGames.filter(
-        (game) => game.currentGameId !== currentPlayer.indexPlayer,
+        (game) => game.currentGameId !== currentPlayer.gameId,
       );
+
       return;
+    } else {
+      playerTurn(connection1, connection2, currentPlayer.indexPlayer);
     }
-    playerTurn(connection1, connection2, currentPlayer.indexPlayer);
   } else {
     currentGames = currentGames.map((game) => {
       if (game.indexPlayer === currentPlayer.indexPlayer) {
@@ -498,60 +486,6 @@ const handleAttack = (request: Request, bot: boolean) => {
     playerTurn(connection1, connection2, enemy.indexPlayer);
   }
 };
-
-const getUpdatedCoordinates = (
-  originalMatrix: MatrixCells[][],
-  updatedMatrix: MatrixCells[][],
-): UpdatedCoordinates[] => {
-  const updatedCoordinates: UpdatedCoordinates[] = [];
-
-  for (let y = 0; y < updatedMatrix.length; y += 1) {
-    for (let x = 0; x < updatedMatrix[y].length; x += 1) {
-      const coordinate = { x, y, status: updatedMatrix[y][x] };
-
-      if (originalMatrix[y][x] !== updatedMatrix[y][x]) {
-        updatedCoordinates.push(coordinate);
-      }
-    }
-  }
-
-  return updatedCoordinates;
-};
-
-function isAllShipsDestroyed(matrix: GameMatrix): boolean {
-  for (const row of matrix) {
-    for (const cell of row) {
-      if (
-        cell === 'small' ||
-        cell === 'medium' ||
-        cell === 'large' ||
-        cell === 'huge'
-      ) {
-        return false;
-      }
-    }
-  }
-  return true;
-}
-
-function generateRandomCoordinates(matrix: MatrixCells[][]): {
-  x: number;
-  y: number;
-} {
-  const excludedValues = ['miss', 'killed', 'shot'];
-
-  const validCoordinates = [];
-  for (let y = 0; y < matrix.length; y += 1) {
-    for (let x = 0; x < matrix[y].length; x += 1) {
-      if (!excludedValues.includes(matrix[y][x])) {
-        validCoordinates.push({ x, y });
-      }
-    }
-  }
-
-  const randomIndex = Math.floor(Math.random() * validCoordinates.length);
-  return validCoordinates[randomIndex];
-}
 
 export const updateWinners = (id: string) => {
   const winner = players.find((player) => player.index === id) as Player;
@@ -588,7 +522,18 @@ const singlePlay = (ws: CustomWebSocket) => {
     updateRoom();
   }
 
-  const currentBot = players.find((player) => player.name === 'BOT') as Player;
+  const bots = players.filter((player) => player.name === 'BOT');
+
+  const freeBots: Player[] = [];
+
+  for (let i = 0; i < bots.length; i += 1) {
+    const currentBot = bots[i];
+    if (!currentGames.some((bot) => bot.indexPlayer === currentBot.index)) {
+      freeBots.push(currentBot);
+    }
+  }
+
+  const currentBot = freeBots[0];
 
   const data1 = JSON.stringify({
     idGame: ws.index,
@@ -658,99 +603,240 @@ const playerTurnWithBot = (firstPlayer: CustomWebSocket, index: string) => {
   firstPlayer.send(JSON.stringify(response));
 };
 
-const isGameWithBot = (request: Request) => {
-  const data = JSON.parse(request.data) as PlayerCoordinates;
+const handleBotAttack = (
+  ws: CustomWebSocket,
+  request: Request,
+  bot: boolean,
+) => {
+  const currentPlayer = JSON.parse(request.data) as PlayerCoordinates;
 
-  const bot = currentGames
-    .filter((game) => game.currentGameId === data.gameId)
-    .filter((player) => player.currentGameId !== player.indexPlayer)[0];
+  const isCurrentPlayerBot = players.find(
+    (player) => player.index === currentPlayer.indexPlayer,
+  ) as Player;
 
-  if (bot === undefined) return;
+  const currentGame = currentGames.filter(
+    (player) => player.currentGameId === ws.index,
+  );
 
-  const botIndex = players.find((player) => player.index === bot.indexPlayer);
+  if (isCurrentPlayerBot.name === 'BOT') {
+    const playerAkaEnemy = currentGame.find(
+      (game) => game.indexPlayer == ws.index,
+    ) as PlayerMatrixForTheGame;
 
-  if (botIndex !== undefined && botIndex.name === 'BOT') {
-    return true;
+    if (playerAkaEnemy === undefined) return;
+
+    setTimeout(() => {
+      botAttack(playerAkaEnemy, request);
+    }, 1000);
   } else {
-    return false;
+    let coordinates: Coordinates;
+
+    const player = currentGame.find(
+      (game) => game.indexPlayer === ws.index,
+    ) as PlayerMatrixForTheGame;
+
+    const enemy = currentGame.filter(
+      (game) => game.indexPlayer !== player.indexPlayer,
+    )[0];
+
+    if (enemy === undefined) return;
+
+    const enemyShips = enemy.ships;
+
+    if (bot) {
+      coordinates = generateRandomCoordinates(enemyShips);
+    } else {
+      coordinates = {
+        x: currentPlayer.x,
+        y: currentPlayer.y,
+      };
+    }
+
+    const { status, updatedMatrix } = checkAttack(
+      enemyShips,
+      coordinates,
+    ) as AttackFeedback;
+
+    currentGames = currentGames.map((item) =>
+      item.indexPlayer === enemy.indexPlayer
+        ? { ...item, ships: updatedMatrix }
+        : item,
+    );
+
+    const connection1 = connections.find(
+      (item) => item.index === player.indexPlayer,
+    ) as CustomWebSocket;
+
+    if (status === 'retry') {
+      const cell = updatedMatrix[currentPlayer.y][currentPlayer.x];
+
+      const response: Response = {
+        type: 'attack',
+        data: JSON.stringify({
+          position: coordinates,
+          currentPlayer: player.indexPlayer,
+          status: cell,
+        }),
+        id: 0,
+      };
+
+      connection1.send(JSON.stringify(response));
+      playerTurnWithBot(connection1, player.indexPlayer);
+    } else if (status === 'shot') {
+      const response: Response = {
+        type: 'attack',
+        data: JSON.stringify({
+          position: coordinates,
+          currentPlayer: player.indexPlayer,
+          status: status,
+        }),
+        id: 0,
+      };
+
+      connection1.send(JSON.stringify(response));
+      playerTurnWithBot(connection1, player.indexPlayer);
+    } else if (status === 'killed') {
+      const updatedCoordinates = getUpdatedCoordinates(
+        enemyShips,
+        updatedMatrix,
+      );
+
+      for (let i = 0; i < updatedCoordinates.length; i++) {
+        const coord = updatedCoordinates[i];
+        const response: Response = {
+          type: 'attack',
+          data: JSON.stringify({
+            position: {
+              x: coord.x,
+              y: coord.y,
+            },
+            currentPlayer: player.indexPlayer,
+            status: coord.status,
+          }),
+          id: 0,
+        };
+
+        connection1.send(JSON.stringify(response));
+      }
+
+      const destroyed = isAllShipsDestroyed(updatedMatrix);
+
+      if (destroyed) {
+        const data = JSON.stringify({
+          winPlayer: currentPlayer.indexPlayer,
+        });
+
+        const response: FinishMessage = {
+          type: 'finish',
+          data,
+          id: 0,
+        };
+
+        connection1.send(JSON.stringify(response));
+
+        updateWinners(player.indexPlayer);
+
+        currentGames = currentGames.filter(
+          (game) => game.currentGameId !== ws.index,
+        );
+
+        return;
+      } else {
+        playerTurnWithBot(connection1, currentPlayer.indexPlayer);
+      }
+    } else {
+      currentGames = currentGames.map((game) => {
+        if (game.indexPlayer === currentPlayer.indexPlayer) {
+          return { ...game, turn: false };
+        } else if (game.indexPlayer === enemy.indexPlayer) {
+          return { ...game, turn: true };
+        }
+
+        return game;
+      });
+
+      const response: Response = {
+        type: 'attack',
+        data: JSON.stringify({
+          position: coordinates,
+          currentPlayer: currentPlayer.indexPlayer,
+          status: status,
+        }),
+        id: 0,
+      };
+
+      connection1.send(JSON.stringify(response));
+
+      playerTurnWithBot(connection1, enemy.indexPlayer);
+
+      setTimeout(() => {
+        botAttack(player);
+      }, 1000);
+    }
   }
 };
 
-const handleBotAttack = (request: Request) => {
-  const currentPlayer = JSON.parse(request.data) as PlayerCoordinates;
-
-  const coordinates = {
-    x: currentPlayer.x,
-    y: currentPlayer.y,
-  };
-
+const botAttack = (realPlayer: PlayerMatrixForTheGame, request?: Request) => {
+  let bot: PlayerMatrixForTheGame;
   const currentGame = currentGames.filter(
-    (player) => player.currentGameId === currentPlayer.gameId,
+    (game) => (game.currentGameId = realPlayer.currentGameId),
   );
 
-  const enemy = currentGame.filter(
-    (game) => game.indexPlayer !== currentPlayer.indexPlayer,
-  )[0];
+  if (request) {
+    const currentBot = JSON.parse(request.data) as PlayerCoordinates;
+    bot = currentGame.find(
+      (item) => item.indexPlayer === currentBot.indexPlayer,
+    ) as PlayerMatrixForTheGame;
+  } else {
+    bot = currentGame.filter(
+      (item) => item.indexPlayer !== realPlayer.indexPlayer,
+    )[0];
+  }
 
-  if (enemy === undefined) return;
+  const newCoords = generateRandomCoordinates(realPlayer.ships);
 
-  const enemyShips = enemy.ships;
-
-  console.table(enemyShips);
-
-  const { status, updatedMatrix } = checkAttack(
-    enemyShips,
-    coordinates,
-  ) as AttackFeedback;
+  const { status, updatedMatrix } = checkAttack(realPlayer.ships, newCoords);
 
   currentGames = currentGames.map((item) =>
-    item.indexPlayer === enemy.indexPlayer
+    item.indexPlayer === realPlayer.indexPlayer
       ? { ...item, ships: updatedMatrix }
       : item,
   );
 
-  const connection1 = connections.find(
-    (item) => item.index === currentPlayer.indexPlayer,
+  const connectionPlayer = connections.find(
+    (item) => item.index === realPlayer.indexPlayer,
   ) as CustomWebSocket;
 
-  type Response = {
-    type: string;
-    data: string;
-    id: number;
-  };
-
-  if (status === 'retry') {
-    const cell = updatedMatrix[currentPlayer.y][currentPlayer.x];
-
+  if (status === 'shot') {
     const response: Response = {
       type: 'attack',
       data: JSON.stringify({
-        position: coordinates,
-        currentPlayer: currentPlayer.indexPlayer,
-        status: cell,
-      }),
-      id: 0,
-    };
-
-    connection1.send(JSON.stringify(response));
-    // connection2.send(JSON.stringify(response));
-    // playerTurn(connection1, connection2, currentPlayer.indexPlayer);
-  } else if (status === 'shot') {
-    const response: Response = {
-      type: 'attack',
-      data: JSON.stringify({
-        position: coordinates,
-        currentPlayer: currentPlayer.indexPlayer,
+        position: newCoords,
+        currentPlayer: bot.indexPlayer,
         status: status,
       }),
       id: 0,
     };
 
-    connection1.send(JSON.stringify(response));
-    // connection2.send(JSON.stringify(response));
-    // playerTurn(connection1, connection2, currentPlayer.indexPlayer);
+    const updatedPlayer = {
+      currentGameId: realPlayer.currentGameId,
+      indexPlayer: realPlayer.indexPlayer,
+      ships: updatedMatrix,
+      turn: false,
+    };
+
+    connectionPlayer.send(JSON.stringify(response));
+
+    playerTurnWithBot(connectionPlayer, bot.indexPlayer);
+
+    setTimeout(() => {
+      botAttack(updatedPlayer);
+    }, 1000);
   } else if (status === 'killed') {
-    const updatedCoordinates = getUpdatedCoordinates(enemyShips, updatedMatrix);
+    const updatedCoordinates = getUpdatedCoordinates(
+      realPlayer.ships,
+      updatedMatrix,
+    );
 
     for (let i = 0; i < updatedCoordinates.length; i++) {
       const coord = updatedCoordinates[i];
@@ -761,20 +847,26 @@ const handleBotAttack = (request: Request) => {
             x: coord.x,
             y: coord.y,
           },
-          currentPlayer: currentPlayer.indexPlayer,
+          currentPlayer: bot.indexPlayer,
           status: coord.status,
         }),
         id: 0,
       };
 
-      connection1.send(JSON.stringify(response));
-      // connection2.send(JSON.stringify(response));
+      connectionPlayer.send(JSON.stringify(response));
     }
+
+    const updatedPlayer = {
+      currentGameId: realPlayer.currentGameId,
+      indexPlayer: realPlayer.indexPlayer,
+      ships: updatedMatrix,
+      turn: false,
+    };
 
     const destroyed = isAllShipsDestroyed(updatedMatrix);
     if (destroyed) {
       const data = JSON.stringify({
-        winPlayer: currentPlayer.indexPlayer,
+        winPlayer: bot.indexPlayer,
       });
 
       const response: FinishMessage = {
@@ -783,39 +875,43 @@ const handleBotAttack = (request: Request) => {
         id: 0,
       };
 
-      connection1.send(JSON.stringify(response));
-      // connection2.send(JSON.stringify(response));
+      connectionPlayer.send(JSON.stringify(response));
 
-      updateWinners(currentPlayer.indexPlayer);
+      updateWinners(bot.indexPlayer);
       currentGames = currentGames.filter(
-        (game) => game.currentGameId !== currentPlayer.indexPlayer,
+        (game) => game.currentGameId !== realPlayer.currentGameId,
       );
       return;
-    }
-    // playerTurn(connection1, connection2, currentPlayer.indexPlayer);
-  } else {
-    // currentGames = currentGames.map((game) => {
-    //   if (game.indexPlayer === currentPlayer.indexPlayer) {
-    //     return { ...game, turn: false };
-    //   } else if (game.indexPlayer === enemy.indexPlayer) {
-    //     return { ...game, turn: true };
-    //   }
+    } else {
+      playerTurnWithBot(connectionPlayer, bot.indexPlayer);
 
-    //   return game;
-    // });
+      setTimeout(() => {
+        botAttack(updatedPlayer);
+      }, 1000);
+    }
+  } else {
+    currentGames = currentGames.map((game) => {
+      if (game.indexPlayer === bot.indexPlayer) {
+        return { ...game, turn: false };
+      } else if (game.indexPlayer === realPlayer.indexPlayer) {
+        return { ...game, turn: true };
+      }
+
+      return game;
+    });
 
     const response: Response = {
       type: 'attack',
       data: JSON.stringify({
-        position: coordinates,
-        currentPlayer: currentPlayer.indexPlayer,
+        position: newCoords,
+        currentPlayer: bot.indexPlayer,
         status: status,
       }),
       id: 0,
     };
 
-    connection1.send(JSON.stringify(response));
-    // connection2.send(JSON.stringify(response));
-    // playerTurn(connection1, connection2, enemy.indexPlayer);
+    connectionPlayer.send(JSON.stringify(response));
+
+    playerTurnWithBot(connectionPlayer, realPlayer.indexPlayer);
   }
 };
