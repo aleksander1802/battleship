@@ -114,42 +114,56 @@ export function handleRequest(ws: CustomWebSocket, request: Request) {
 }
 
 const flawlessWictory = (ws: CustomWebSocket) => {
-  const isThePlayerWasInTheGame = currentGames.filter(
-    (game) => game.currentGameId === ws.index,
+  const isThePlayerWasInTheGame = currentGames.find(
+    (game) => game.indexPlayer === ws.index,
   );
 
-  if (isThePlayerWasInTheGame.length === 2) {
-    const playerWhoLeftTheGame = isThePlayerWasInTheGame.find(
-      (player) => player.indexPlayer === ws.index,
-    ) as PlayerMatrixForTheGame;
-
-    const winnerOfTheGame = isThePlayerWasInTheGame.filter(
-      (player) => player.indexPlayer !== playerWhoLeftTheGame.indexPlayer,
-    )[0];
-
-    currentGames = currentGames.filter(
-      (game) => game.currentGameId !== playerWhoLeftTheGame.currentGameId,
+  if (isThePlayerWasInTheGame) {
+    const currentGame = currentGames.filter(
+      (game) => game.currentGameId === isThePlayerWasInTheGame.currentGameId,
     );
 
-    const connection1 = connections.find(
-      (ws) => ws.index === winnerOfTheGame.indexPlayer,
-    );
+    if (currentGame.length === 1) {
+      currentGames = currentGames.filter(
+        (game) => game.currentGameId !== isThePlayerWasInTheGame.currentGameId,
+      );
+    } else if (currentGame.length === 2) {
+      const playerWhoLeftTheGame = currentGame.find(
+        (player) => player.indexPlayer === ws.index,
+      ) as PlayerMatrixForTheGame;
 
-    const data = JSON.stringify({
-      winPlayer: winnerOfTheGame.indexPlayer,
-    });
+      const winnerOfTheGame = currentGame.filter(
+        (player) => player.indexPlayer !== playerWhoLeftTheGame.indexPlayer,
+      )[0];
 
-    const response: FinishMessage = {
-      type: 'finish',
-      data,
-      id: 0,
-    };
+      currentGames = currentGames.filter(
+        (game) => game.currentGameId !== playerWhoLeftTheGame.currentGameId,
+      );
 
-    if (connection1) {
-      connection1.send(JSON.stringify(response));
+      const connection1 = connections.find(
+        (ws) => ws.index === winnerOfTheGame.indexPlayer,
+      );
+
+      const data = JSON.stringify({
+        winPlayer: winnerOfTheGame.indexPlayer,
+      });
+
+      const response: FinishMessage = {
+        type: 'finish',
+        data,
+        id: 0,
+      };
+
+      if (connection1) {
+        connection1.send(JSON.stringify(response));
+      }
+
+      updateWinners(winnerOfTheGame.indexPlayer);
     }
-
-    updateWinners(winnerOfTheGame.indexPlayer);
+  } else {
+    currentGames = currentGames.filter(
+      (game) => game.currentGameId !== ws.index,
+    );
   }
 };
 

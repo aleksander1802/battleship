@@ -85,16 +85,20 @@ function placeHugeShip(matrix: GameMatrix, ships: Ship[]): void {
 }
 
 function placeLargeShips(matrix: GameMatrix, ships: Ship[]): void {
-  for (let i = 0; i < 2; i++) {
+  for (let i = 0; i < 2; i += 1) {
     const ship = getUnplacedShip(ships, 'large');
     let row: number | undefined, col: number | undefined;
     let validPlacement = false;
-    let horizontal = Math.random() < 0.5;
+    const horizontal = Math.random() < 0.5;
 
     while (!validPlacement) {
-      row = getRandomNumber(0, 9);
-      col = getRandomNumber(0, 9);
-      horizontal = Math.random() < 0.5;
+      if (horizontal) {
+        row = getRandomNumber(0, 9);
+        col = getRandomNumber(0, 7);
+      } else {
+        row = getRandomNumber(0, 7);
+        col = getRandomNumber(0, 9);
+      }
       validPlacement = checkPlacement(matrix, row, col, ship.size, horizontal);
       if (validPlacement) {
         validPlacement = checkNoAdjacentShips(
@@ -108,15 +112,13 @@ function placeLargeShips(matrix: GameMatrix, ships: Ship[]): void {
     }
 
     if (row !== undefined && col !== undefined) {
-      if (horizontal) {
-        if (col + ship.size <= 10) {
-          for (let j = col; j < col + ship.size; j++) {
+      if (ship.type === 'large') {
+        if (horizontal) {
+          for (let j = col; j < col + ship.size; j += 1) {
             matrix[row][j] = ship.type;
           }
-        }
-      } else {
-        if (row + ship.size <= 10) {
-          for (let j = row; j < row + ship.size; j++) {
+        } else {
+          for (let j = row; j < row + ship.size; j += 1) {
             matrix[j][col] = ship.type;
           }
         }
