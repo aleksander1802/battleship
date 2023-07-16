@@ -278,14 +278,8 @@ const addShips = (request: AddShipsRequest) => {
 
     if (bot1.name === 'BOT' || bot2?.name === 'BOT') {
       startGameWithBot(currentGame);
-      console.log(currentGames);
     } else {
-      const arrayForGameStarting: PlayerMatrixForTheGame[] =
-        currentGames.filter((game) => game.currentGameId === shipsData.gameId);
-
-      if (arrayForGameStarting.length === 2) {
-        startTheGame(arrayForGameStarting);
-      }
+      startTheGame(currentGame);
     }
   }
 };
@@ -779,7 +773,7 @@ const handleBotAttack = (
 const botAttack = (realPlayer: PlayerMatrixForTheGame, request?: Request) => {
   let bot: PlayerMatrixForTheGame;
   const currentGame = currentGames.filter(
-    (game) => (game.currentGameId = realPlayer.currentGameId),
+    (game) => game.currentGameId === realPlayer.currentGameId,
   );
 
   if (request) {

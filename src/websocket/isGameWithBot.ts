@@ -1,21 +1,21 @@
 import { PlayerCoordinates } from '../model/types/ships.ts';
-import { Request } from '../model/types/index.ts';
+import { Player, Request } from '../model/types/index.ts';
 import { currentGames, players } from './server.ts';
 
 export const isGameWithBot = (request: Request) => {
   const data = JSON.parse(request.data) as PlayerCoordinates;
 
-  const bot = currentGames
-    .filter((game) => game.currentGameId === data.gameId)
-    .filter((player) => player.currentGameId !== player.indexPlayer)[0];
-
+  const bot = currentGames.filter((game) => game.currentGameId === data.gameId);
   if (bot === undefined) return;
 
-  const botIndex = players.find((player) => player.index === bot.indexPlayer);
+  if (bot.length === 2) {
+    const bot1 = players.find(
+      (player) => player.index === bot[0].indexPlayer,
+    ) as Player;
+    const bot2 = players.find(
+      (player) => player.index === bot[1].indexPlayer,
+    ) as Player;
 
-  if (botIndex !== undefined && botIndex.name === 'BOT') {
-    return true;
-  } else {
-    return false;
+    return bot1.name === 'BOT' || bot2.name === 'BOT';
   }
 };
